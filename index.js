@@ -57,7 +57,24 @@ function init() {
     bot.sendMessage(msg.chat.id, topics.map(function(e){ return e.name }).join(', '));
   });
   
+  // 'tellme' command listener
+  bot.onText(/^tellme (.+)$/, function (msg, match) {
+    console.log('[tellme] command received: ' + match[0]);
+    var name = match[1];
+    var topic = topics.find(function(element, index, array) {
+      return element.name === name;
+    });
+    if (topic === undefined) {
+      bot.sendMessage(msg.chat.id, 'topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+    } else {
+      bot.sendMessage(msg.chat.id, topic.data);
+    }
+  });
+  
   console.log('bot server started...');
 }
 
 init();
+topics.forEach(function(topic) {
+  topic.update();
+});
