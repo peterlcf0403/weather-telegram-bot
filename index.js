@@ -2,6 +2,7 @@
 
 var Bot = require('node-telegram-bot-api');
 var feed = require('feed-read');
+var cheerio = require('cheerio');
 
 var token = '181337028:AAFfWt_1vivoBVwmC8K28ZRzmaegiedp1HM';
 var bot = new Bot(token, { polling: true });
@@ -74,9 +75,23 @@ function init() {
     'current', 
     'http://rss.weather.gov.hk/rss/CurrentWeather.xml', 
     function(rss) {
-      var text = rss[0].content.replace(/<[^>]*>/g, '').split('\r\n');
-      text[3] = text[2].trim() + ' ' + text[3].trim();
-      this.data = text.slice(3,8).join('\n');
+      // scrap wanted part from content
+      let $ = cheerio.load(rss[0].content);
+      var child = $('p')[0].children;
+      
+      // reformat first line (time & location)
+      var tmp = child[0].data.split('\r\n');
+      this.data = tmp[1].trim() + ' ' + tmp[2].trim();
+      
+      // process other lines, skips non-text childs
+      for (let i=1; i<child.length; i++) {
+        if (child[i].type == 'text') {
+          let str = child[i].data.trim();
+          if (str != '')
+            this.data += '\n   ' + str;
+        }
+      }
+      console.log(this.data);
     }
   ));
   
@@ -84,7 +99,7 @@ function init() {
     'warning', 
     'http://rss.weather.gov.hk/rss/WeatherWarningSummaryv2.xml', 
     function(rss) {
-      this.data = rss[0].content.replace(/<[^>]*>/g, '');
+      this.data = rss[0].content.replace(/<[^>]*>/g, '').trim();
     }
   ));
   

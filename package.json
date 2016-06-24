@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "cheerio": "^0.20.0",
     "feed-read": "0.0.1",
     "mongoose": "^4.5.1",
     "node-telegram-bot-api": "^0.23.3"
