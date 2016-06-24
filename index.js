@@ -4,7 +4,7 @@ var Bot = require('node-telegram-bot-api');
 var feed = require('feed-read');
 
 var token = '181337028:AAFfWt_1vivoBVwmC8K28ZRzmaegiedp1HM';
-var bot;
+var bot = new Bot(token, { polling: true });
 var topics = [];
 
 // topic class
@@ -13,16 +13,57 @@ function Topic(name, url, parser) {
   this.url = url;
   this.data = 'No update for ' + this.name;
   this.parser = parser.bind(this);
+  this.chatIDs = [];
+  this.lastUpdate = null;
 }
 
 Topic.prototype = {
+  
+  // update rss feed of the topic
   update: function() {
     var topic = this;
     feed(this.url, function(err, rss) {
-      console.log('['+ topic.name +'] rss fetched');
-      topic.parser(rss);
-      console.log(topic.data);
+      var date = rss[0].published;
+      console.log('Received feed of topic ['+ topic.name +']...');
+      //console.log('\tDate: ' + date);
+      if (topic.lastUpdate != null && date.getTime() == topic.lastUpdate.getTime()) {
+        console.log('\tNo update.');
+      } else {
+        topic.lastUpdate = date;
+        topic.parser(rss);
+        console.log('\tcontent updated!');
+        //console.log(rss);
+        
+        // send updates to chats
+        topic.chatIDs.forEach(function(id){
+          bot.sendMessage(id, topic.data);
+        });
+      }
     });
+  },
+  
+  // add chat into topic's subscribe list
+  subscribe: function(id) {
+    if (this.chatIDs.indexOf(id) == -1) {
+      this.chatIDs.push(id);
+      console.log('New subscriber to topic ['+ this.name +']');
+      return true;
+    }
+    else {
+      return false;
+    }
+  },
+  
+  // remove chat from topic's subscribe list
+  unsubscribe: function(id) {
+    var index = this.chatIDs.indexOf(id);
+    if (index == -1)
+      return false;
+    else {
+      this.chatIDs.splice(index, 1);
+      console.log('A subscriber is left from topic ['+ this.name +']');
+      return true;
+    }
   }
 };
 
@@ -47,9 +88,6 @@ function init() {
     }
   ));
   
-  // set up bot
-  var bot = new Bot(token, { polling: true });
-  
   // adding listeners
   // 'topic' command listener
   bot.onText(/^topic$/, function (msg, match){
@@ -61,20 +99,60 @@ function init() {
   bot.onText(/^tellme (.+)$/, function (msg, match) {
     console.log('[tellme] command received: ' + match[0]);
     var name = match[1];
-    var topic = topics.find(function(element, index, array) {
-      return element.name === name;
-    });
+    var topic = topics.find(function(e, i, array) { return e.name === name; });
     if (topic === undefined) {
-      bot.sendMessage(msg.chat.id, 'topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+      bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
     } else {
       bot.sendMessage(msg.chat.id, topic.data);
     }
+  });
+  
+  // 'subscribe' command listener
+  bot.onText(/^subscribe (.+)$/, function (msg, match) {
+    console.log('[subscribe] command received: ' + match[0]);
+    var name = match[1];
+    var topic = topics.find(function(e, i, array) { return e.name === name; });
+    if (topic === undefined) {
+      bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+    } else {
+      if (topic.subscribe(msg.chat.id)) {
+        bot.sendMessage(msg.chat.id, 'Subscribe successfully!');
+      } else {
+        bot.sendMessage(msg.chat.id, 'You are already subscribed to the topic!');
+      }
+    }
+  });
+  
+  // 'unsubscribe' command listener
+  bot.onText(/^unsubscribe (.+)$/, function (msg, match) {
+    console.log('[unsubscribe] command received: ' + match[0]);
+    var name = match[1];
+    var topic = topics.find(function(e, i, array) { return e.name === name; });
+    if (topic === undefined) {
+      bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+    } else {
+      if (topic.unsubscribe(msg.chat.id)) {
+        bot.sendMessage(msg.chat.id, 'Unsubscribe successfully!');
+      } else {
+        bot.sendMessage(msg.chat.id, 'You do not subscribe to this topic before!');
+      }
+    }
+  });
+  
+  // update topics
+  topics.forEach(function(topic) {
+    topic.update();
   });
   
   console.log('bot server started...');
 }
 
 init();
-topics.forEach(function(topic) {
-  topic.update();
-});
+
+// for debug
+setInterval(function() {
+  topics.forEach(function(topic) {
+    topic.update();
+  });
+}, 10000);
+
