@@ -10,33 +10,48 @@ var topics = [];
 
 // topic class
 function Topic(name, url, parser) {
+  
+  // name of the topic used when subscribe & query
   this.name = name;
+  
+  // url of the topic's rss feed
   this.url = url;
-  this.data = 'No update for ' + this.name;
+  
+  // stores chat ids that have subscribed the topic
+  this.subs = [];
+  
+  // function to parse the feed to suitable format
   this.parser = parser.bind(this);
-  this.chatIDs = [];
-  this.lastUpdate = null;
+  
+  // stores the last feed
+  this.data = 'No content available for ' + this.name;
+  
+  // the time of the feed source last update
+  this.lastPublish = null;
+  
+  // the time of the last attempt to get the feed
+  this.lastFeed = null;
 }
 
 Topic.prototype = {
   
-  // update rss feed of the topic
-  update: function() {
+  // get rss feed of the topic
+  getFeed: function() {
     var topic = this;
     feed(this.url, function(err, rss) {
       var date = rss[0].published;
       console.log('Received feed of topic ['+ topic.name +']...');
       //console.log('\tDate: ' + date);
-      if (topic.lastUpdate != null && date.getTime() == topic.lastUpdate.getTime()) {
+      if (topic.lastPublish != null && date.getTime() == topic.lastPublish.getTime()) {
         console.log('\tNo update.');
       } else {
-        topic.lastUpdate = date;
+        topic.lastPublish = date;
         topic.parser(rss);
         console.log('\tcontent updated!');
         //console.log(rss);
         
         // send updates to chats
-        topic.chatIDs.forEach(function(id){
+        topic.subs.forEach(function(id){
           bot.sendMessage(id, topic.data);
         });
       }
@@ -45,8 +60,8 @@ Topic.prototype = {
   
   // add chat into topic's subscribe list
   subscribe: function(id) {
-    if (this.chatIDs.indexOf(id) == -1) {
-      this.chatIDs.push(id);
+    if (this.subs.indexOf(id) == -1) {
+      this.subs.push(id);
       console.log('New subscriber to topic ['+ this.name +']');
       return true;
     }
@@ -57,11 +72,11 @@ Topic.prototype = {
   
   // remove chat from topic's subscribe list
   unsubscribe: function(id) {
-    var index = this.chatIDs.indexOf(id);
+    var index = this.subs.indexOf(id);
     if (index == -1)
       return false;
     else {
-      this.chatIDs.splice(index, 1);
+      this.subs.splice(index, 1);
       console.log('A subscriber is left from topic ['+ this.name +']');
       return true;
     }
@@ -156,7 +171,7 @@ function init() {
   
   // update topics
   topics.forEach(function(topic) {
-    topic.update();
+    topic.getFeed();
   });
   
   console.log('bot server started...');
@@ -167,7 +182,7 @@ init();
 // for debug
 setInterval(function() {
   topics.forEach(function(topic) {
-    topic.update();
+    topic.getFeed();
   });
 }, 10000);
 
