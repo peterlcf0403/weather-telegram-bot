@@ -13,6 +13,8 @@ var bot = new Bot(token, { polling: true });
 // storing all topic objects
 var topicList;
 
+var supportedLang = ['eng', 'cht', 'chs'];
+
 
 // topic class
 function Topic(name, url, parser, update) {
@@ -33,10 +35,18 @@ function Topic(name, url, parser, update) {
   this.update = update.bind(this);
   
   // stores the last feed
-  this.data = 'No content available for ' + this.name;
+  this.data = {
+    eng: 'No content available for ' + this.name,
+    cht: '',
+    chs: ''
+  };
   
   // the time of the feed source last update
-  this.lastPublish = null;
+  this.lastPublish = {
+    eng: null,
+    cht: null,
+    chs: null
+  };
   
   // the time of the last attempt to get the feed
   this.lastFeed = null;
@@ -48,32 +58,43 @@ Topic.prototype = {
   getFeed: function() {
     var topic = this;
     try {
-    feed(this.url, function(err, rss) {
-      if (err) throw err;
-      console.log('Received feed of topic ['+ topic.name +']...');
-      
-      // check if the rss feed is updated
-      var date = rss[0].published;
-      if (topic.lastPublish != null && date.getTime() == topic.lastPublish.getTime()) {
-        console.log('\tNo update.');
-      } else {
-        console.log('\tcontent updated!');
-        
-        // parse rss feed and update publish time
-        topic.lastPublish = date;
-        if (typeof topic.parser == 'function')
-          topic.data = topic.parser(rss);
-        else
-          topic.data = rss[0].content;
-        
-        // send updates to chats
-        topic.subs.forEach(function(id){
-          bot.sendMessage(id, topic.data);
-        });
+      for (var name in topic.url) {
+        if (topic.url.hasOwnProperty(name)) {
+          feed(topic.url[name], function() {
+            var lang = name;
+            return function(err, rss) {
+              if (err) throw err;
+              console.log('Received feed of topic ['+ topic.name +'] in language ['+ lang +']...');
+              
+              // check if the rss feed is updated
+              var date = rss[0].published;
+              if (topic.lastPublish[lang] != null && date.getTime() == topic.lastPublish[lang].getTime()) {
+                console.log('\tNo update.');
+              } else {
+                console.log('\tcontent updated!');
+                
+                // parse rss feed and update publish time
+                topic.lastPublish[lang] = date;
+                if (typeof topic.parser == 'function')
+                  topic.data[lang] = topic.parser(rss);
+                else
+                  topic.data[lang] = rss[0].content;
+                
+                console.log(topic.data[lang]);
+                
+                // send updates to chats
+                topic.subs.forEach(function(sub){
+                  if (sub.lang == lang)
+                    bot.sendMessage(sub.id, topic.data[lang]);
+                });
+              }
+            }
+          }());
+        }
       }
       // update last feed time
       topic.lastFeed = new Date();
-    });
+      
     } catch (err) {
       console.log(err);
     }
@@ -105,8 +126,9 @@ Topic.prototype = {
           chat.save(function(err) {
             if (err) throw err;
             // update topic's subscriber list
-            if (topic.subs.indexOf(id) == -1) {
-              topic.subs.push(id);
+            var sub = topic.subs.find(function(e) { return e.id == id });
+            if (sub === undefined) {
+              topic.subs.push({id: id, lang: 'eng'});
             }
             callback(null, true);
             console.log('New subscriber to topic ['+ topic.name +']');
@@ -145,7 +167,7 @@ Topic.prototype = {
             chat.topics.splice(index, 1);
             chat.save(function(err) {
               if (err) throw err;
-              var index = topic.subs.indexOf(id);
+              var index = topic.subs.findIndex(function(e) { return e.id == id});
               console.log(index);
               if (index != -1) {
                 topic.subs.splice(index, 1);
@@ -163,6 +185,30 @@ Topic.prototype = {
   }
 };
 
+// 
+function checkUser(id, callback) {
+  Chat.find({id: id}, function(err, res) {
+    if (err) return callback(err);
+    if (res.length)
+      // chat already exist
+      callback(null, res[0]);
+    else {
+      // chat does not exist. create a new entry
+      var chat = new Chat({
+        id: id, 
+        language: 'eng',
+        topics: []
+      });
+      chat.save(function(err) {
+        if (err) 
+          callback(err);
+        else 
+          callback(null, chat);
+      });
+    }
+  });
+}
+
 // server initialization
 function init() {
 
@@ -171,26 +217,28 @@ function init() {
   // create topic objects
   // topic 'current'
   topicList.push( new Topic(
-    'current', 
-    'http://rss.weather.gov.hk/rss/CurrentWeather.xml', 
+    'current',
+    {
+      eng: 'http://rss.weather.gov.hk/rss/CurrentWeather.xml',
+      cht: 'http://rss.weather.gov.hk/rss/CurrentWeather_uc.xml',
+      chs: 'http://gbrss.weather.gov.hk/rss/CurrentWeather_uc.xml'
+    }, 
     function(rss) {
       // scrap wanted part from content
       let $ = cheerio.load(rss[0].content);
       var child = $('p')[0].children;
       
-      // reformat first line (time & location)
-      var tmp = child[0].data.split('\r\n');
-      var result = tmp[1].trim() + ' ' + tmp[2].trim();
-      
-      // process other lines, skips non-text childs
-      for (let i=1; i<child.length; i++) {
+      // reformate each line
+      var result = '';
+      for (let i=0; i<child.length; i++) {
         if (child[i].type == 'text') {
-          let str = child[i].data.trim();
-          if (str != '')
-            result += '\n   ' + str;
+          let str = child[i].data.trim().replace(/[\s\r\n]+/g, ' ');
+          if (str != '') {
+            if (i > 0) result += '\n   ';
+            result += str;
+          }
         }
       }
-      //console.log(result);
       return result;
     },
     function() {
@@ -210,8 +258,12 @@ function init() {
   
   // topic 'warning'
   topicList.push( new Topic(
-    'warning', 
-    'http://rss.weather.gov.hk/rss/WeatherWarningSummaryv2.xml', 
+    'warning',
+    {
+      eng: 'http://rss.weather.gov.hk/rss/WeatherWarningSummaryv2.xml',
+      cht: 'http://rss.weather.gov.hk/rss/WeatherWarningSummaryv2_uc.xml',
+      chs: 'http://gbrss.weather.gov.hk/rss/WeatherWarningSummaryv2_uc.xml'
+    },
     function(rss) {
       // remove html tags
       return rss[0].content.replace(/<[^>]*>/g, '').trim();
@@ -241,7 +293,7 @@ function init() {
         chat.topics.forEach(function(topic){
           for (let i=0; i<topicList.length; i++) {
             if (topicList[i].name === topic) {
-              topicList[i].subs.push(chat.id);
+              topicList[i].subs.push({id: chat.id, lang: chat.language});
               break;
             }
           }
@@ -250,63 +302,102 @@ function init() {
     });
     console.log('Finished reading subscribers');
   
-  
-  // setting up command listeners
-  // 'topic' command listener
-  bot.onText(/^topic$/, function (msg, match){
-    console.log('[topic] command received: ' + match[0]);
-    bot.sendMessage(msg.chat.id, topicList.map(function(e){ return e.name }).join(', '));
-  });
-  
-  // 'tellme' command listener
-  bot.onText(/^tellme (.+)$/, function (msg, match) {
-    console.log('[tellme] command received: ' + match[0]);
-    var name = match[1];
-    var topic = topicList.find(function(e, i, array) { return e.name === name; });
-    if (topic === undefined) {
-      bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
-    } else {
-      bot.sendMessage(msg.chat.id, topic.data);
-    }
-  });
-  
-  // 'subscribe' command listener
-  bot.onText(/^subscribe (.+)$/, function (msg, match) {
-    console.log('[subscribe] command received: ' + match[0]);
-    var name = match[1];
-    var topic = topicList.find(function(e, i, array) { return e.name === name; });
-    if (topic === undefined) {
-      bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
-    } else {
-      topic.subscribe(msg.chat.id, function(err, res){
-        if (err)
-          bot.sendMessage(msg.chat.id, 'Error occured! Please try it later.');
-        else if (res)
-          bot.sendMessage(msg.chat.id, 'Subscribe successfully!');
-        else
-          bot.sendMessage(msg.chat.id, 'You are already subscribed to the topic!');
-      });
-    }
-  });
-  
-  // 'unsubscribe' command listener
-  bot.onText(/^unsubscribe (.+)$/, function (msg, match) {
-    console.log('[unsubscribe] command received: ' + match[0]);
-    var name = match[1];
-    var topic = topicList.find(function(e, i, array) { return e.name === name; });
-    if (topic === undefined) {
-      bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
-    } else {
-      topic.unsubscribe(msg.chat.id, function(err, res) {
-        if (err)
-          bot.sendMessage(msg.chat.id, 'Error occured! Please try it later.');
-        else if (res)
-          bot.sendMessage(msg.chat.id, 'Unsubscribe successfully!');
-        else
-          bot.sendMessage(msg.chat.id, 'You did not subscribe to this topic before!');
-      });
-    }
-  });
+    // setting up command listeners
+    // 'topic' command listener
+    bot.onText(/^topic$/, function (msg, match){
+      console.log('[topic] command received: ' + match[0]);
+      bot.sendMessage(msg.chat.id, topicList.map(function(e){ return e.name }).join(', '));
+    });
+    
+    // 'tellme' command listener
+    bot.onText(/^tellme (.+)$/, function (msg, match) {
+      console.log('[tellme] command received: ' + match[0]);
+      try {
+        checkUser(msg.chat.id, function(err, chat){
+          if (err) throw err;
+          var name = match[1];
+          var topic = topicList.find(function(e) { return e.name === name; });
+          if (topic === undefined) {
+            bot.sendMessage(chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+          } else {
+            bot.sendMessage(chat.id, topic.data[chat.language]);
+          }
+        });
+      } catch (err) {
+        console.log(err);
+      }
+    });
+    
+    // 'subscribe' command listener
+    bot.onText(/^subscribe (.+)$/, function (msg, match) {
+      console.log('[subscribe] command received: ' + match[0]);
+      var name = match[1];
+      var topic = topicList.find(function(e) { return e.name === name; });
+      if (topic === undefined) {
+        bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+      } else {
+        topic.subscribe(msg.chat.id, function(err, res){
+          if (err)
+            bot.sendMessage(msg.chat.id, 'Error occured! Please try it later.');
+          else if (res)
+            bot.sendMessage(msg.chat.id, 'Subscribe successfully!');
+          else
+            bot.sendMessage(msg.chat.id, 'You are already subscribed to the topic!');
+        });
+      }
+    });
+    
+    // 'unsubscribe' command listener
+    bot.onText(/^unsubscribe (.+)$/, function (msg, match) {
+      console.log('[unsubscribe] command received: ' + match[0]);
+      var name = match[1];
+      var topic = topicList.find(function(e) { return e.name === name; });
+      if (topic === undefined) {
+        bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+      } else {
+        topic.unsubscribe(msg.chat.id, function(err, res) {
+          if (err)
+            bot.sendMessage(msg.chat.id, 'Error occured! Please try it later.');
+          else if (res)
+            bot.sendMessage(msg.chat.id, 'Unsubscribe successfully!');
+          else
+            bot.sendMessage(msg.chat.id, 'You did not subscribe to this topic before!');
+        });
+      }
+    });
+    
+    // 'language' command listener
+    bot.onText(/^language (.+)$/, function (msg, match){
+      console.log('[language] command received: ' + match[0]);
+      try {
+        checkUser(msg.chat.id, function(err, chat){
+          if (err) throw err;
+          var lang = match[1];
+          if (supportedLang.indexOf(lang) == -1) {
+            bot.sendMessage(chat.id, 
+              'Language not supported! Supported languages are\n' +
+              '  eng: English\n' +
+              '  cht: Chinese(traditional)\n' +
+              '  chs: Chinese(simplified)'
+            );
+          } else {
+            chat.language = lang;
+            chat.save(function (err){
+              if (err) throw err;
+              topicList.forEach(function(topic) {
+                var sub = topic.subs.find(function(e) { return e.id == chat.id });
+                if (sub !== undefined) sub.lang = lang;
+              });
+              var msg = { eng: 'OK', cht: '\u597d\u7684', chs: '\u597d\u7684'};
+              bot.sendMessage(chat.id, msg[lang]);
+            });
+          }
+        });
+      } catch (err) {
+        bot.sendMessage(chat.id, 'Error occured!');
+        console.log(err);
+      }
+    });
     
     start();
   });
