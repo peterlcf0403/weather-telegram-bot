@@ -1,4 +1,4 @@
-'use strict'
+﻿'use strict'
 
 var Bot = require('node-telegram-bot-api'),
     feed = require('feed-read'),
@@ -38,9 +38,9 @@ function Topic(name, url, parser, update) {
   
   // stores the last feed
   this.data = {
-    eng: 'No content available for ' + this.name,
-    cht: '',
-    chs: ''
+    eng: 'No content available now.',
+    cht: '暫無內容',
+    chs: '暂无内容'
   };
   
   // the time of the feed source last update
@@ -253,7 +253,7 @@ function tellmeCmdHandler(msg, match) {
       var name = match[1];
       var topic = topicList.find(function(e) { return e.name === name; });
       if (topic === undefined) {
-        bot.sendMessage(chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+        bot.sendMessage(chat.id, 'Topic not found!\nType \'topic\' to see available topics.');
       } else {
         bot.sendMessage(chat.id, topic.data[chat.language]);
       }
@@ -323,8 +323,8 @@ function languageCmdHandler(msg, match){
         bot.sendMessage(chat.id, 
           'Language not supported! Supported languages are\n' +
           '  eng: English\n' +
-          '  cht: Chinese(traditional)\n' +
-          '  chs: Chinese(simplified)'
+          '  cht: 繁體中文\n' +
+          '  chs: 简体中文'
         );
       } else {
         chat.language = lang;
@@ -334,7 +334,11 @@ function languageCmdHandler(msg, match){
             var sub = topic.subs.find(function(e) { return e.id == chat.id });
             if (sub !== undefined) sub.lang = lang;
           });
-          var msg = { eng: 'OK', cht: '\u597d\u7684', chs: '\u597d\u7684'};
+          var msg = { 
+            eng: 'OK. Feeds will be shown in English.', 
+            cht: '好的. 訂閱將以繁體中文顯示', 
+            chs: '好的. 订阅将以简体中文显示'
+          };
           bot.sendMessage(chat.id, msg[lang]);
         });
       }
