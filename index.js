@@ -103,86 +103,61 @@ Topic.prototype = {
   },
   
   // add chat into topic's subscribe list
-  subscribe: function(id, callback) {
-    var topic = this;
-    // finding chat in db
+  subscribe: function(chat, callback) {
     try {
-      Chat.find({id: id}, function(err, res) {
-        var chat;
-        if (err) throw err;
-        else if (res.length == 0) {
-          // chat not exist. create new chat
-          chat = new Chat({ 
-            id: id, 
-            language: 'eng',
-            topics: []
-          });
-        }
-        // chat exist. 
-        else chat = res[0];
-
-        // check if chat already subscribed the topic
-        if (chat.topics.indexOf(topic.name) == -1) {
-          // new subscriber. update chat's topic list
-          chat.topics.push(topic.name);
-          chat.save(function(err) {
-            if (err) throw err;
-            // update topic's subscriber list
-            var sub = topic.subs.find(function(e) { return e.id == id });
-            if (sub === undefined) {
-              topic.subs.push({id: id, lang: 'eng'});
-            }
-            callback(null, true);
-            console.log('New subscriber to topic ['+ topic.name +']');
-          });
-        } else {
-          // already subscribed
-          callback(null, false);
-        }
-      });
+      var topic = this;
+      
+      // check if chat already subscribed the topic
+      if (chat.topics.indexOf(topic.name) == -1) {
+        
+        // new subscriber. update chat's topic list
+        chat.topics.push(topic.name);
+        chat.save(function(err) {
+          if (err) throw err;
+          
+          // update topic's subscriber list
+          var sub = topic.subs.find(function(e) { return e.id == chat.id });
+          if (sub === undefined) {
+            topic.subs.push({id: chat.id, lang: chat.language});
+          }
+          callback(null, true);
+          console.log('New subscriber to topic ['+ topic.name +']');
+        });
+      } else {
+        // already subscribed
+        callback(null, false);
+      }
     } catch (err) {
       console.log(err);
-      callback(err, null);
+      callback(err);
     }
   },
   
   // remove chat from topic's subscribe list
-  unsubscribe: function(id, callback) {
+  unsubscribe: function(chat, callback) {
     var topic = this;
-    // finding chat in db
     try {
-      Chat.find({id: id}, function(err, res) {
-        if (err) throw err;
-        else if (res.length == 0) {
-          // chat not exist. 
-          callback(null, false);
-        }
-        else {
-          // chat exist. check if chat already subscribed the topic
-          var chat = res[0];
-          var index = chat.topics.indexOf(topic.name);
-          if (index == -1) {
-            // not subscribe yet
-            callback(null, false);
-          } else {
-            // is subscribed. remove the topic
-            chat.topics.splice(index, 1);
-            chat.save(function(err) {
-              if (err) throw err;
-              var index = topic.subs.findIndex(function(e) { return e.id == id});
-              console.log(index);
-              if (index != -1) {
-                topic.subs.splice(index, 1);
-              }
-              callback(null, true);
-              console.log('A subscriber is left from topic ['+ topic.name +']');
-            });
+      // check if chat already subscribed the topic
+      var index = chat.topics.indexOf(topic.name);
+      if (index == -1) {
+        // not subscribe yet
+        callback(null, false);
+      } else {
+        // is subscribed. remove the topic
+        chat.topics.splice(index, 1);
+        chat.save(function(err) {
+          if (err) throw err;
+          var index = topic.subs.findIndex(function(e) { return e.id == chat.id});
+          if (index != -1) {
+            topic.subs.splice(index, 1);
           }
-        }
-      });
+          callback(null, true);
+          console.log('A subscriber is left from topic ['+ topic.name +']');
+        });
+      }
     } catch (err) {
       console.log(err);
-      callback(err, null);
+      callback(err);
     }
   }
 
@@ -290,37 +265,51 @@ function tellmeCmdHandler(msg, match) {
 
 function subscribeCmdHandler(msg, match) {
   console.log('[subscribe] command received: ' + match[0]);
-  var name = match[1];
-  var topic = topicList.find(function(e) { return e.name === name; });
-  if (topic === undefined) {
-    bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
-  } else {
-    topic.subscribe(msg.chat.id, function(err, res){
-      if (err)
-        bot.sendMessage(msg.chat.id, 'Error occured! Please try it later.');
-      else if (res)
-        bot.sendMessage(msg.chat.id, 'Subscribe successfully!');
-      else
-        bot.sendMessage(msg.chat.id, 'You are already subscribed to the topic!');
+  try {
+    checkUser(msg.chat.id, function(err, chat) {
+      if (err) throw err;
+      var name = match[1];
+      var topic = topicList.find(function(e) { return e.name === name; });
+      if (topic === undefined) {
+        bot.sendMessage(chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+      } else {
+        topic.subscribe(chat, function(err, res){
+          if (err)
+            bot.sendMessage(chat.id, 'Error occured! Please try it later.');
+          else if (res)
+            bot.sendMessage(chat.id, 'Subscribe successfully!');
+          else
+            bot.sendMessage(chat.id, 'You are already subscribed to the topic!');
+        });
+      }
     });
+  } catch (err) {
+    console.log(err);
   }
 }
 
 function unsubscribeCmdHandler(msg, match) {
   console.log('[unsubscribe] command received: ' + match[0]);
-  var name = match[1];
-  var topic = topicList.find(function(e) { return e.name === name; });
-  if (topic === undefined) {
-    bot.sendMessage(msg.chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
-  } else {
-    topic.unsubscribe(msg.chat.id, function(err, res) {
-      if (err)
-        bot.sendMessage(msg.chat.id, 'Error occured! Please try it later.');
-      else if (res)
-        bot.sendMessage(msg.chat.id, 'Unsubscribe successfully!');
-      else
-        bot.sendMessage(msg.chat.id, 'You did not subscribe to this topic before!');
+  try {
+    checkUser(msg.chat.id, function(err, chat) {
+      if (err) throw err;
+      var name = match[1];
+      var topic = topicList.find(function(e) { return e.name === name; });
+      if (topic === undefined) {
+        bot.sendMessage(chat.id, 'Topic \'' + name + '\' not found!\nType \'topic\' to see available topics.');
+      } else {
+        topic.unsubscribe(chat, function(err, res) {
+          if (err)
+            bot.sendMessage(chat.id, 'Error occured! Please try it later.');
+          else if (res)
+            bot.sendMessage(chat.id, 'Unsubscribe successfully!');
+          else
+            bot.sendMessage(chat.id, 'You did not subscribe to this topic before!');
+        });
+      }
     });
+  } catch (err) {
+    console.log(err);
   }
 }
 
